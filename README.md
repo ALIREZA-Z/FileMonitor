@@ -1,3 +1,4 @@
+[![Build status](https://ci.appveyor.com/api/projects/status/y8kbm1o1i8xs138c?svg=true)](https://ci.appveyor.com/project/ali-reza-zareian/filemonitor)
 
 # FileMonitor
 
