@@ -5,10 +5,11 @@
 FileMonitor is a Windows-based application written in C++ that provides:
 
 - **File monitoring**  
-- **Socket server communication**  
-- **Support for multiple clients connecting to the server**  
-- **Robocopy integration** for efficient file copying  
-- **Configuration via `config.ini`**
+- **Socket server communication**
+- **future features**
+  - **Support for multiple clients connecting to the server**  
+  - **Robocopy integration** for efficient file copying  
+  - **Configuration via `config.ini`**
 
 ---
 
