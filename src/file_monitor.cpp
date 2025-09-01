@@ -11,24 +11,41 @@
 
 // Send message to server
 void sendMessage(const std::string& socketPath, const std::string& msg) {
-    WinsockRAII winsock;  // ensures WSACleanup() at scope exit
+    try {
+        WinsockRAII winsock;  // ensures WSACleanup() at scope exit
 
-    SOCKET sock = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (sock == INVALID_SOCKET) {
-        throw std::runtime_error("Socket creation failed");
-    }
+        SOCKET sock = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (sock == INVALID_SOCKET) {
+            std::cerr << "[Client] Socket creation failed, error: " << WSAGetLastError() << std::endl;
+            return;
+        }
 
-    sockaddr_un addr{};
-    addr.sun_family = AF_UNIX;
-    strcpy_s(addr.sun_path, socketPath.c_str());
+        sockaddr_un addr{};
+        addr.sun_family = AF_UNIX;
+        strcpy_s(addr.sun_path, socketPath.c_str());
 
-    if (connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR) {
+        std::cout << "[Client] Attempting to connect to: " << socketPath << std::endl;
+
+        if (connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR) {
+            std::cerr << "[Client] Connect failed, error: " << WSAGetLastError() << std::endl;
+            closesocket(sock);
+            return;
+        }
+
+        std::cout << "[Client] Connected successfully. Sending message..." << std::endl;
+
+        int sent = send(sock, msg.c_str(), static_cast<int>(msg.size()), 0);
+        if (sent == SOCKET_ERROR) {
+            std::cerr << "[Client] Send failed, error: " << WSAGetLastError() << std::endl;
+        } else {
+            std::cout << "[Client] Message sent: " << msg << std::endl;
+        }
+
         closesocket(sock);
-        return; // fail silently if server not ready
+        std::cout << "[Client] Disconnected." << std::endl;
+    } catch (const std::exception& ex) {
+        std::cerr << "[Client] Exception: " << ex.what() << std::endl;
     }
-
-    send(sock, msg.c_str(), static_cast<int>(msg.size()), 0);
-    closesocket(sock);
 }
 
 
@@ -101,10 +118,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Determine current folder for socket
-    char cwd[MAX_PATH];
-    GetCurrentDirectoryA(MAX_PATH, cwd);
-    std::string socketPath = std::string(cwd) + "\\filemonitor.sock";
+    // uses the same function as server. %TEMP%
+    std::string socketPath = getTempSocketPath();  
 
     // Convert argv to wide string
     int size_needed = MultiByteToWideChar(CP_UTF8, 0, argv[1], -1, NULL, 0);
