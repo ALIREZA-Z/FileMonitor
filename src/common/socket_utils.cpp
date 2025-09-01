@@ -1,8 +1,11 @@
-#include "socket_utils.h"
+#include <winsock2.h>   // must come first
+#include <ws2tcpip.h>
 #include <windows.h>
 #include <stdexcept>
-#include <winsock2.h>
+#include "socket_utils.h"
+
 #pragma comment(lib, "ws2_32.lib")
+
 
 std::string getTempSocketPath(const std::string& sockName) {
     char tmpPath[MAX_PATH];
