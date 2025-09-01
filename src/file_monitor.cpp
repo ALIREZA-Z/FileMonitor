@@ -6,15 +6,15 @@
 #include <string>
 #pragma comment(lib, "ws2_32.lib")
 
+#include "common/socket_utils.h"
+
+// Send message to server
 void sendMessage(const std::string& socketPath, const std::string& msg) {
-    WSADATA wsaData;
-    WSAStartup(MAKEWORD(2,2), &wsaData);
+    WinsockRAII winsock;  // ensures WSACleanup() at scope exit
 
     SOCKET sock = socket(AF_UNIX, SOCK_STREAM, 0);
     if (sock == INVALID_SOCKET) {
-        std::cerr << "Socket creation failed\n";
-        WSACleanup();
-        return;
+        throw std::runtime_error("Socket creation failed");
     }
 
     sockaddr_un addr{};
@@ -22,16 +22,14 @@ void sendMessage(const std::string& socketPath, const std::string& msg) {
     strcpy_s(addr.sun_path, socketPath.c_str());
 
     if (connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR) {
-        // std::cerr << "Connect failed\n";   // keep quiet if server not ready
         closesocket(sock);
-        WSACleanup();
-        return;
+        return; // fail silently if server not ready
     }
 
-    send(sock, msg.c_str(), static_cast<int>(msg.length()), 0);
+    send(sock, msg.c_str(), static_cast<int>(msg.size()), 0);
     closesocket(sock);
-    WSACleanup();
 }
+
 
 void monitorDirectory(const std::wstring& dir, const std::string& socketPath) {
     HANDLE hDir = CreateFileW(
