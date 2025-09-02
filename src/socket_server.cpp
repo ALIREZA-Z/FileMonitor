@@ -7,7 +7,7 @@
 #include <map>
 #include <vector>
 #include <sstream>
-
+#include <cstdlib>  // for system()
 
 #pragma comment(lib, "ws2_32.lib")
 #include "common/socket_utils.h"
@@ -21,6 +21,13 @@ std::vector<std::string> split(const std::string& str, char delim) {
         tokens.push_back(item);
     }
     return tokens;
+}
+
+// Trigger robocopy to sync src -> dest
+void runRobocopy(const std::string& src, const std::string& dest) {
+    std::string cmd = "robocopy \"" + src + "\" \"" + dest + "\" /MIR /NFL /NDL /NJH /NJS /nc /ns /np";
+    std::cout << "[Server] Running: " << cmd << std::endl;
+    system(cmd.c_str());
 }
 
 int main() {
@@ -60,16 +67,16 @@ int main() {
                 std::string msg(buffer);
 
                 auto parts = split(msg, '|');
-                if (parts.size() == 3) {
-                    // Registration: clientID|src|dest
+                if (parts.size() == 3 && parts[1].rfind("SRC:", 0) == 0 && parts[2].rfind("DST:", 0) == 0) {
+                    // Registration: clientID|SRC:path|DST:path
                     std::string clientID = parts[0];
-                    std::string src = parts[1];
-                    std::string dest = parts[2];
+                    std::string src = parts[1].substr(4);  // remove "SRC:"
+                    std::string dest = parts[2].substr(4); // remove "DST:"
                     clients[clientID] = {src, dest};
                     std::cout << "[Server] Registered client: " << clientID 
                               << " src: " << src << " dest: " << dest << "\n";
                 } else if (parts.size() == 2) {
-                    // Normal message: clientID|message
+                    // Normal file action: clientID|message
                     std::string clientID = parts[0];
                     std::string actionMsg = parts[1];
                     auto it = clients.find(clientID);
@@ -77,7 +84,10 @@ int main() {
                         std::cout << "[Server][" << clientID << "] " 
                                   << actionMsg << " (src: " << it->second.first 
                                   << " dest: " << it->second.second << ")\n";
-                        // TODO: trigger robocopy using src/dest if needed
+
+                        // Run robocopy to sync src -> dest
+                        runRobocopy(it->second.first, it->second.second);
+
                     } else {
                         std::cout << "[Server] Unknown client: " << clientID 
                                   << " message: " << actionMsg << "\n";
