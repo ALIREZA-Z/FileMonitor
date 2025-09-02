@@ -40,25 +40,43 @@ void sendMessage(const std::string& socketPath, const std::string& clientId, con
             return;
         }
 
-#ifndef NDEBUG
-        std::cout << "[Client] Connected successfully. Sending message..." << std::endl;
-#endif
-
         // Prepend clientId to message: "clientId|message"
         std::string fullMsg = clientId + "|" + msg;
         send(sock, fullMsg.c_str(), static_cast<int>(fullMsg.size()), 0);
 
 #ifndef NDEBUG
         std::cout << "[Client] Message sent: " << fullMsg << std::endl;
-#endif
-        closesocket(sock);
-
-#ifndef NDEBUG
         std::cout << "[Client] Disconnected." << std::endl;
 #endif
+
+        closesocket(sock);
     } catch (const std::exception& ex) {
         std::cerr << "[Client] Exception: " << ex.what() << std::endl;
     }
+}
+
+// Check if folder can be accessed and monitored
+bool checkFolderAccessible(const std::wstring& folderPath) {
+    HANDLE hDir = CreateFileW(
+        folderPath.c_str(),
+        FILE_LIST_DIRECTORY,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS,
+        nullptr
+    );
+
+    if (hDir == INVALID_HANDLE_VALUE) {
+        std::string errorMsg = "ERROR: Cannot open source folder: " + StringUtils::wstringToUtf8(folderPath);
+#ifndef NDEBUG
+        std::cerr << errorMsg << std::endl;
+#endif
+        return false;
+    }
+
+    CloseHandle(hDir); // Close handle after test
+    return true;
 }
 
 void monitorDirectory(const std::wstring& dir, const std::string& socketPath, const std::string& clientId) {
@@ -78,7 +96,7 @@ void monitorDirectory(const std::wstring& dir, const std::string& socketPath, co
 #ifndef NDEBUG
         std::cerr << errorMsg << std::endl;
 #endif
-        return; // Stop monitoring
+        return;
     }
 
 #ifndef NDEBUG
@@ -93,7 +111,7 @@ void monitorDirectory(const std::wstring& dir, const std::string& socketPath, co
             hDir,
             &buffer,
             sizeof(buffer),
-            FALSE, // no subdirectories
+            FALSE,
             FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE,
             &bytesReturned,
             nullptr,
@@ -135,17 +153,21 @@ int main(int argc, char* argv[]) {
     }
 
     std::string socketPath = getTempSocketPath();
-
-    // Convert source folder path to wstring
     std::wstring folderPath = StringUtils::utf8ToWstring(argv[1]);
 
-    // Generate a short unique client ID (e.g., 8 chars)
+    // Check folder accessibility before sending messages
+    if (!checkFolderAccessible(folderPath)) {
+        std::cerr << StringUtils::wstringToUtf8(folderPath) << " is not accessible.";
+        return 1;
+    }
+
+    // Generate a short unique client ID
     std::string clientId = IdUtils::generateShortId(8);
 #ifndef NDEBUG
     std::cout << "[Client] Generated client ID: " << clientId << std::endl;
 #endif
 
-    // Send initial message with source and destination paths
+    // Send initial SRC/DST message
     std::string initMsg = "SRC:" + std::string(argv[1]) + "|DST:" + std::string(argv[2]);
     sendMessage(socketPath, clientId, initMsg);
 
