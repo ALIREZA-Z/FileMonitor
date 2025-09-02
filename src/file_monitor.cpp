@@ -8,13 +8,13 @@
 #pragma comment(lib, "ws2_32.lib")
 
 #include "common/socket_utils.h"
-#include "common/string_utils.h"   // contains wstringToUtf8 / utf8ToWstring
-#include "common/id_utils.h"       // generateShortId
+#include "common/string_utils.h"
+#include "common/id_utils.h"
 
 // Send message to server
 void sendMessage(const std::string& socketPath, const std::string& clientId, const std::string& msg) {
     try {
-        WinsockRAII winsock;
+        WinsockRAII winsock;  // ensures WSACleanup() at scope exit
 
         SOCKET sock = socket(AF_UNIX, SOCK_STREAM, 0);
         if (sock == INVALID_SOCKET) {
@@ -28,6 +28,10 @@ void sendMessage(const std::string& socketPath, const std::string& clientId, con
         addr.sun_family = AF_UNIX;
         strcpy_s(addr.sun_path, socketPath.c_str());
 
+#ifndef NDEBUG
+        std::cout << "[Client] Attempting to connect to: " << socketPath << std::endl;
+#endif
+
         if (connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR) {
 #ifndef NDEBUG
             std::cerr << "[Client] Connect failed, error: " << WSAGetLastError() << std::endl;
@@ -36,7 +40,11 @@ void sendMessage(const std::string& socketPath, const std::string& clientId, con
             return;
         }
 
-        // Use "|" as separator
+#ifndef NDEBUG
+        std::cout << "[Client] Connected successfully. Sending message..." << std::endl;
+#endif
+
+        // Prepend clientId to message: "clientId|message"
         std::string fullMsg = clientId + "|" + msg;
         send(sock, fullMsg.c_str(), static_cast<int>(fullMsg.size()), 0);
 
@@ -45,6 +53,9 @@ void sendMessage(const std::string& socketPath, const std::string& clientId, con
 #endif
         closesocket(sock);
 
+#ifndef NDEBUG
+        std::cout << "[Client] Disconnected." << std::endl;
+#endif
     } catch (const std::exception& ex) {
         std::cerr << "[Client] Exception: " << ex.what() << std::endl;
     }
@@ -62,24 +73,32 @@ void monitorDirectory(const std::wstring& dir, const std::string& socketPath, co
     );
 
     if (hDir == INVALID_HANDLE_VALUE) {
+        std::string errorMsg = "ERROR: Cannot monitor folder: " + StringUtils::wstringToUtf8(dir);
+        sendMessage(socketPath, clientId, errorMsg);
 #ifndef NDEBUG
-        std::cerr << "Failed to monitor directory\n";
+        std::cerr << errorMsg << std::endl;
 #endif
-        return;
+        return; // Stop monitoring
     }
-
-    char buffer[1024];
-    DWORD bytesReturned;
 
 #ifndef NDEBUG
     std::wcout << L"Monitoring directory: " << dir << std::endl;
 #endif
 
-    while (true) {
-        if (ReadDirectoryChangesW(hDir, &buffer, sizeof(buffer), FALSE,
-            FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE,
-            &bytesReturned, nullptr, nullptr)) {
+    char buffer[1024];
+    DWORD bytesReturned;
 
+    while (true) {
+        if (ReadDirectoryChangesW(
+            hDir,
+            &buffer,
+            sizeof(buffer),
+            FALSE, // no subdirectories
+            FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE,
+            &bytesReturned,
+            nullptr,
+            nullptr
+        )) {
             FILE_NOTIFY_INFORMATION* fni = reinterpret_cast<FILE_NOTIFY_INFORMATION*>(buffer);
             do {
                 std::wstring fileName(fni->FileName, fni->FileNameLength / sizeof(WCHAR));
@@ -111,24 +130,27 @@ void monitorDirectory(const std::wstring& dir, const std::string& socketPath, co
 
 int main(int argc, char* argv[]) {
     if (argc < 3) {
-        std::cerr << "Usage: file_monitor.exe <folder_path> <dest_path>\n";
+        std::cerr << "Usage: file_monitor.exe <src_folder_path> <dst_folder_path>\n";
         return 1;
     }
 
     std::string socketPath = getTempSocketPath();
-    std::wstring folder_path = StringUtils::utf8ToWstring(argv[1]);
 
-    // Generate unique client ID
+    // Convert source folder path to wstring
+    std::wstring folderPath = StringUtils::utf8ToWstring(argv[1]);
+
+    // Generate a short unique client ID (e.g., 8 chars)
     std::string clientId = IdUtils::generateShortId(8);
-
 #ifndef NDEBUG
     std::cout << "[Client] Generated client ID: " << clientId << std::endl;
 #endif
 
-    // Initial message with SRC and DST paths
-    std::string initMsg = "SRC:" + std::string(argv[1]) + "|DST:" + std::string(argv[2]);
+    // Send initial message with source and destination paths
+    std::string initMsg = "SRC:" + std::string(argv[1]) + ";DST:" + std::string(argv[2]);
     sendMessage(socketPath, clientId, initMsg);
 
-    monitorDirectory(folder_path, socketPath, clientId);
+    // Start monitoring
+    monitorDirectory(folderPath, socketPath, clientId);
+
     return 0;
 }
