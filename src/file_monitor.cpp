@@ -8,6 +8,7 @@
 #pragma comment(lib, "ws2_32.lib")
 
 #include "common/socket_utils.h"
+#include "common/string_utils.h"
 
 // Send message to server
 void sendMessage(const std::string& socketPath, const std::string& msg) {
@@ -86,9 +87,7 @@ void monitorDirectory(const std::wstring& dir, const std::string& socketPath) {
                 std::wstring fileName(fni->FileName, fni->FileNameLength / sizeof(WCHAR));
 
                 // convert wide string to UTF-8
-                int sizeNeeded = WideCharToMultiByte(CP_UTF8, 0, fileName.c_str(), (int)fileName.size(), NULL, 0, NULL, NULL);
-                std::string utf8File(sizeNeeded, 0);
-                WideCharToMultiByte(CP_UTF8, 0, fileName.c_str(), (int)fileName.size(), &utf8File[0], sizeNeeded, NULL, NULL);
+                std::string utf8File = StringUtils::wstringToUtf8(fileName);
 
                 std::string action;
                 switch (fni->Action) {
