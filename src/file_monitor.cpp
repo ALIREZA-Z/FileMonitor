@@ -146,7 +146,7 @@ int main(int argc, char* argv[]) {
 #endif
 
     // Send initial message with source and destination paths
-    std::string initMsg = "SRC:" + std::string(argv[1]) + ";DST:" + std::string(argv[2]);
+    std::string initMsg = "SRC:" + std::string(argv[1]) + "|DST:" + std::string(argv[2]);
     sendMessage(socketPath, clientId, initMsg);
 
     // Start monitoring
