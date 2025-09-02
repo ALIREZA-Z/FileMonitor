@@ -2,41 +2,32 @@
 
 # FileMonitor
 
-FileMonitor is a Windows-based application written in C++ that provides:
+FileMonitor is a Windows-based application that synchronizes folders by monitoring source directories and triggering actions on a central server.  
 
-- **File monitoring**  
-- **Socket server communication(AF_UNIX)**
-- **future features**
-  - **Support for multiple clients connecting to the server**  
-  - **Robocopy integration** for efficient file copying  
-  - **Configuration via `config.ini`**
+### How It Works
+
+1. Each **Client** (`file_monitor.exe`) monitors a specific source folder for changes (create, modify, delete, rename).  
+2. When a change is detected, the client sends a message with its **Client ID** to the **Server** (`socket_server.exe`).  
+3. The server identifies the client by ID, looks up the corresponding source and destination folders, and triggers **Robocopy** to synchronize the source folder to the destination folder.  
+4. This ensures that every change in the monitored folder is reflected in the destination folder automatically. 
+
+### Next modification (Cold delay)
+Client detects changes → Sends message to Server → Server waits X seconds for Cold delay → Runs Robocopy from SRC to DST
 
 ---
 
-## Features
+## Setup
 
-### 1. File Monitor
-- Monitors changes in specified folders.
-- Automatically logs or synchronizes changes according to the configuration.
+### Prerequisites
+- Windows 10/11
+- Visual Studio 2022 or newer (with C++ Desktop development workload)
+- CMake 3.24+ (for building the project)
+- Robocopy (comes with Windows)
 
-### 2. Socket Server
-- Handles multiple client connections simultaneously.
-- Clients can send/receive commands and updates to/from the server.
+### Build Steps
+1. Clone the repository:
+   
+   git clone https://github.com/your-username/FileMonitor.git
+   cd FileMonitor
 
-### 3. Robocopy Support
-- Uses **Robocopy** for robust file transfer and synchronization.
-- Can copy files from monitored directories to specified destinations reliably.
-
-### 4. Configuration (`config.ini`)
-- All settings are stored in a `config.ini` file located alongside the executable.
-- Example options:
-  ```ini
-  [Server]
-  MaxClients=10
-
-  [Sync1]
-  SourceFolder=C:\Source
-  DestinationFolder=D:\Backup
-  Monitoring=1
-  UseRobocopy=True
-
+   .\compile_debug.bat 
