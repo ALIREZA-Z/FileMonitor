@@ -4,36 +4,82 @@
 #include <afunix.h>
 #include <iostream>
 #include <string>
+
 #pragma comment(lib, "ws2_32.lib")
 
-void sendMessage(const std::string& socketPath, const std::string& msg) {
-    WSADATA wsaData;
-    WSAStartup(MAKEWORD(2,2), &wsaData);
+#include "common/socket_utils.h"
+#include "common/string_utils.h"
+#include "common/id_utils.h"
 
-    SOCKET sock = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (sock == INVALID_SOCKET) {
-        std::cerr << "Socket creation failed\n";
-        WSACleanup();
-        return;
-    }
+// Send message to server
+void sendMessage(const std::string& socketPath, const std::string& clientId, const std::string& msg) {
+    try {
+        WinsockRAII winsock;  // ensures WSACleanup() at scope exit
 
-    sockaddr_un addr{};
-    addr.sun_family = AF_UNIX;
-    strcpy_s(addr.sun_path, socketPath.c_str());
+        SOCKET sock = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (sock == INVALID_SOCKET) {
+#ifndef NDEBUG
+            std::cerr << "[Client] Socket creation failed, error: " << WSAGetLastError() << std::endl;
+#endif
+            return;
+        }
 
-    if (connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR) {
-        // std::cerr << "Connect failed\n";   // keep quiet if server not ready
+        sockaddr_un addr{};
+        addr.sun_family = AF_UNIX;
+        strcpy_s(addr.sun_path, socketPath.c_str());
+
+#ifndef NDEBUG
+        std::cout << "[Client] Attempting to connect to: " << socketPath << std::endl;
+#endif
+
+        if (connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR) {
+#ifndef NDEBUG
+            std::cerr << "[Client] Connect failed, error: " << WSAGetLastError() << std::endl;
+#endif
+            closesocket(sock);
+            return;
+        }
+
+        // Prepend clientId to message: "clientId|message"
+        std::string fullMsg = clientId + "|" + msg;
+        send(sock, fullMsg.c_str(), static_cast<int>(fullMsg.size()), 0);
+
+#ifndef NDEBUG
+        std::cout << "[Client] Message sent: " << fullMsg << std::endl;
+        std::cout << "[Client] Disconnected." << std::endl;
+#endif
+
         closesocket(sock);
-        WSACleanup();
-        return;
+    } catch (const std::exception& ex) {
+        std::cerr << "[Client] Exception: " << ex.what() << std::endl;
     }
-
-    send(sock, msg.c_str(), static_cast<int>(msg.length()), 0);
-    closesocket(sock);
-    WSACleanup();
 }
 
-void monitorDirectory(const std::wstring& dir, const std::string& socketPath) {
+// Check if folder can be accessed and monitored
+bool checkFolderAccessible(const std::wstring& folderPath) {
+    HANDLE hDir = CreateFileW(
+        folderPath.c_str(),
+        FILE_LIST_DIRECTORY,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS,
+        nullptr
+    );
+
+    if (hDir == INVALID_HANDLE_VALUE) {
+        std::string errorMsg = "ERROR: Cannot open source folder: " + StringUtils::wstringToUtf8(folderPath);
+#ifndef NDEBUG
+        std::cerr << errorMsg << std::endl;
+#endif
+        return false;
+    }
+
+    CloseHandle(hDir); // Close handle after test
+    return true;
+}
+
+void monitorDirectory(const std::wstring& dir, const std::string& socketPath, const std::string& clientId) {
     HANDLE hDir = CreateFileW(
         dir.c_str(),
         FILE_LIST_DIRECTORY,
@@ -45,21 +91,27 @@ void monitorDirectory(const std::wstring& dir, const std::string& socketPath) {
     );
 
     if (hDir == INVALID_HANDLE_VALUE) {
-        std::cerr << "Failed to monitor directory\n";
+        std::string errorMsg = "ERROR: Cannot monitor folder: " + StringUtils::wstringToUtf8(dir);
+        sendMessage(socketPath, clientId, errorMsg);
+#ifndef NDEBUG
+        std::cerr << errorMsg << std::endl;
+#endif
         return;
     }
 
+#ifndef NDEBUG
+    std::wcout << L"Monitoring directory: " << dir << std::endl;
+#endif
+
     char buffer[1024];
     DWORD bytesReturned;
-
-    std::wcout << L"Monitoring directory: " << dir << std::endl;
 
     while (true) {
         if (ReadDirectoryChangesW(
             hDir,
             &buffer,
             sizeof(buffer),
-            FALSE, // no subdirectories
+            FALSE,
             FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE,
             &bytesReturned,
             nullptr,
@@ -68,11 +120,7 @@ void monitorDirectory(const std::wstring& dir, const std::string& socketPath) {
             FILE_NOTIFY_INFORMATION* fni = reinterpret_cast<FILE_NOTIFY_INFORMATION*>(buffer);
             do {
                 std::wstring fileName(fni->FileName, fni->FileNameLength / sizeof(WCHAR));
-
-                // convert wide string to UTF-8
-                int sizeNeeded = WideCharToMultiByte(CP_UTF8, 0, fileName.c_str(), (int)fileName.size(), NULL, 0, NULL, NULL);
-                std::string utf8File(sizeNeeded, 0);
-                WideCharToMultiByte(CP_UTF8, 0, fileName.c_str(), (int)fileName.size(), &utf8File[0], sizeNeeded, NULL, NULL);
+                std::string utf8File = StringUtils::wstringToUtf8(fileName);
 
                 std::string action;
                 switch (fni->Action) {
@@ -84,8 +132,10 @@ void monitorDirectory(const std::wstring& dir, const std::string& socketPath) {
                     default: action = "Other: "; break;
                 }
 
+#ifndef NDEBUG
                 std::cout << action << utf8File << std::endl;
-                sendMessage(socketPath, action + utf8File);
+#endif
+                sendMessage(socketPath, clientId, action + utf8File);
 
                 if (fni->NextEntryOffset == 0) break;
                 fni = reinterpret_cast<FILE_NOTIFY_INFORMATION*>((LPBYTE)fni + fni->NextEntryOffset);
@@ -97,21 +147,32 @@ void monitorDirectory(const std::wstring& dir, const std::string& socketPath) {
 }
 
 int main(int argc, char* argv[]) {
-    if (argc < 2) {
-        std::cerr << "Usage: file_monitor.exe <folder_path>\n";
+    if (argc < 3) {
+        std::cerr << "Usage: file_monitor.exe <src_folder_path> <dst_folder_path>\n";
         return 1;
     }
 
-    // Determine current folder for socket
-    char cwd[MAX_PATH];
-    GetCurrentDirectoryA(MAX_PATH, cwd);
-    std::string socketPath = std::string(cwd) + "\\filemonitor.sock";
+    std::string socketPath = getTempSocketPath();
+    std::wstring folderPath = StringUtils::utf8ToWstring(argv[1]);
 
-    // Convert argv to wide string
-    int size_needed = MultiByteToWideChar(CP_UTF8, 0, argv[1], -1, NULL, 0);
-    std::wstring folderPath(size_needed, 0);
-    MultiByteToWideChar(CP_UTF8, 0, argv[1], -1, &folderPath[0], size_needed);
+    // Check folder accessibility before sending messages
+    if (!checkFolderAccessible(folderPath)) {
+        std::cerr << StringUtils::wstringToUtf8(folderPath) << " is not accessible.";
+        return 1;
+    }
 
-    monitorDirectory(folderPath, socketPath);
+    // Generate a short unique client ID
+    std::string clientId = IdUtils::generateShortId(8);
+#ifndef NDEBUG
+    std::cout << "[Client] Generated client ID: " << clientId << std::endl;
+#endif
+
+    // Send initial SRC/DST message
+    std::string initMsg = "SRC:" + std::string(argv[1]) + "|DST:" + std::string(argv[2]);
+    sendMessage(socketPath, clientId, initMsg);
+
+    // Start monitoring
+    monitorDirectory(folderPath, socketPath, clientId);
+
     return 0;
 }
