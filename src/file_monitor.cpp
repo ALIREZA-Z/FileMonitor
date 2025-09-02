@@ -17,7 +17,9 @@ void sendMessage(const std::string& socketPath, const std::string& msg) {
 
         SOCKET sock = socket(AF_UNIX, SOCK_STREAM, 0);
         if (sock == INVALID_SOCKET) {
+#ifndef NDEBUG
             std::cerr << "[Client] Socket creation failed, error: " << WSAGetLastError() << std::endl;
+#endif
             return;
         }
 
@@ -25,25 +27,35 @@ void sendMessage(const std::string& socketPath, const std::string& msg) {
         addr.sun_family = AF_UNIX;
         strcpy_s(addr.sun_path, socketPath.c_str());
 
+#ifndef NDEBUG
         std::cout << "[Client] Attempting to connect to: " << socketPath << std::endl;
+#endif
 
         if (connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR) {
+#ifndef NDEBUG
             std::cerr << "[Client] Connect failed, error: " << WSAGetLastError() << std::endl;
+#endif
             closesocket(sock);
             return;
         }
 
+#ifndef NDEBUG
         std::cout << "[Client] Connected successfully. Sending message..." << std::endl;
+#endif
 
         int sent = send(sock, msg.c_str(), static_cast<int>(msg.size()), 0);
+#ifndef NDEBUG
         if (sent == SOCKET_ERROR) {
             std::cerr << "[Client] Send failed, error: " << WSAGetLastError() << std::endl;
         } else {
             std::cout << "[Client] Message sent: " << msg << std::endl;
         }
+#endif
 
         closesocket(sock);
+#ifndef NDEBUG
         std::cout << "[Client] Disconnected." << std::endl;
+#endif
     } catch (const std::exception& ex) {
         std::cerr << "[Client] Exception: " << ex.what() << std::endl;
     }
@@ -62,7 +74,9 @@ void monitorDirectory(const std::wstring& dir, const std::string& socketPath) {
     );
 
     if (hDir == INVALID_HANDLE_VALUE) {
+#ifndef NDEBUG
         std::cerr << "Failed to monitor directory\n";
+#endif
         return;
     }
 
@@ -85,8 +99,6 @@ void monitorDirectory(const std::wstring& dir, const std::string& socketPath) {
             FILE_NOTIFY_INFORMATION* fni = reinterpret_cast<FILE_NOTIFY_INFORMATION*>(buffer);
             do {
                 std::wstring fileName(fni->FileName, fni->FileNameLength / sizeof(WCHAR));
-
-                // convert wide string to UTF-8
                 std::string utf8File = StringUtils::wstringToUtf8(fileName);
 
                 std::string action;
@@ -117,10 +129,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // uses the same function as server. %TEMP%
     std::string socketPath = getTempSocketPath();  
 
-    // Convert argv to wide string
     int size_needed = MultiByteToWideChar(CP_UTF8, 0, argv[1], -1, NULL, 0);
     std::wstring folderPath(size_needed, 0);
     MultiByteToWideChar(CP_UTF8, 0, argv[1], -1, &folderPath[0], size_needed);
