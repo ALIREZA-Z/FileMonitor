@@ -1,4 +1,4 @@
-[![Build status](https://ci.appveyor.com/api/projects/status/y8kbm1o1i8xs138c?svg=true)](https://ci.appveyor.com/project/ali-reza-zareian/filemonitor)
+
 
 # FileMonitor
 
@@ -28,6 +28,16 @@ Client detects changes → Sends message to Server → Server waits X seconds fo
 1. Clone the repository:
    
    git clone https://github.com/your-username/FileMonitor.git
-   cd FileMonitor
 
+   git clone https://github.com/microsoft/vcpkg.git
+   cd vcpkg
+   .\bootstrap-vcpkg.bat
+   
+   # Install library
+   vcpkg install zeromq
+   # Install cpp header
+   vcpkg install cppzmq
+
+
+   cd FileMonitor
    .\compile_debug.bat 

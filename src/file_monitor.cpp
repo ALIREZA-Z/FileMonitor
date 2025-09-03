@@ -1,57 +1,26 @@
-#include <winsock2.h>
-#include <ws2tcpip.h>
 #include <windows.h>
-#include <afunix.h>
 #include <iostream>
 #include <string>
+#include <zmq.hpp>
 
-#pragma comment(lib, "ws2_32.lib")
-
-#include "common/socket_utils.h"
 #include "common/string_utils.h"
 #include "common/id_utils.h"
 
-// Send message to server
-void sendMessage(const std::string& socketPath, const std::string& clientId, const std::string& msg) {
+// Global ZeroMQ context
+zmq::context_t zmqContext(1);
+
+// Send message to server via ZeroMQ
+void sendMessage(zmq::socket_t& socket, const std::string& clientId, const std::string& msg) {
     try {
-        WinsockRAII winsock;  // ensures WSACleanup() at scope exit
-
-        SOCKET sock = socket(AF_UNIX, SOCK_STREAM, 0);
-        if (sock == INVALID_SOCKET) {
-#ifndef NDEBUG
-            std::cerr << "[Client] Socket creation failed, error: " << WSAGetLastError() << std::endl;
-#endif
-            return;
-        }
-
-        sockaddr_un addr{};
-        addr.sun_family = AF_UNIX;
-        strcpy_s(addr.sun_path, socketPath.c_str());
-
-#ifndef NDEBUG
-        std::cout << "[Client] Attempting to connect to: " << socketPath << std::endl;
-#endif
-
-        if (connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR) {
-#ifndef NDEBUG
-            std::cerr << "[Client] Connect failed, error: " << WSAGetLastError() << std::endl;
-#endif
-            closesocket(sock);
-            return;
-        }
-
-        // Prepend clientId to message: "clientId|message"
         std::string fullMsg = clientId + "|" + msg;
-        send(sock, fullMsg.c_str(), static_cast<int>(fullMsg.size()), 0);
+        zmq::message_t zmqMsg(fullMsg.begin(), fullMsg.end());
+        socket.send(zmqMsg, zmq::send_flags::none);
 
 #ifndef NDEBUG
         std::cout << "[Client] Message sent: " << fullMsg << std::endl;
-        std::cout << "[Client] Disconnected." << std::endl;
 #endif
-
-        closesocket(sock);
-    } catch (const std::exception& ex) {
-        std::cerr << "[Client] Exception: " << ex.what() << std::endl;
+    } catch (const zmq::error_t& ex) {
+        std::cerr << "[Client] ZeroMQ error: " << ex.what() << std::endl;
     }
 }
 
@@ -69,17 +38,15 @@ bool checkFolderAccessible(const std::wstring& folderPath) {
 
     if (hDir == INVALID_HANDLE_VALUE) {
         std::string errorMsg = "ERROR: Cannot open source folder: " + StringUtils::wstringToUtf8(folderPath);
-#ifndef NDEBUG
         std::cerr << errorMsg << std::endl;
-#endif
         return false;
     }
 
-    CloseHandle(hDir); // Close handle after test
+    CloseHandle(hDir);
     return true;
 }
 
-void monitorDirectory(const std::wstring& dir, const std::string& socketPath, const std::string& clientId) {
+void monitorDirectory(const std::wstring& dir, zmq::socket_t& socket, const std::string& clientId) {
     HANDLE hDir = CreateFileW(
         dir.c_str(),
         FILE_LIST_DIRECTORY,
@@ -92,10 +59,8 @@ void monitorDirectory(const std::wstring& dir, const std::string& socketPath, co
 
     if (hDir == INVALID_HANDLE_VALUE) {
         std::string errorMsg = "ERROR: Cannot monitor folder: " + StringUtils::wstringToUtf8(dir);
-        sendMessage(socketPath, clientId, errorMsg);
-#ifndef NDEBUG
+        sendMessage(socket, clientId, errorMsg);
         std::cerr << errorMsg << std::endl;
-#endif
         return;
     }
 
@@ -132,10 +97,7 @@ void monitorDirectory(const std::wstring& dir, const std::string& socketPath, co
                     default: action = "Other: "; break;
                 }
 
-#ifndef NDEBUG
-                std::cout << action << utf8File << std::endl;
-#endif
-                sendMessage(socketPath, clientId, action + utf8File);
+                sendMessage(socket, clientId, action + utf8File);
 
                 if (fni->NextEntryOffset == 0) break;
                 fni = reinterpret_cast<FILE_NOTIFY_INFORMATION*>((LPBYTE)fni + fni->NextEntryOffset);
@@ -152,27 +114,27 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::string socketPath = getTempSocketPath();
     std::wstring folderPath = StringUtils::utf8ToWstring(argv[1]);
 
-    // Check folder accessibility before sending messages
     if (!checkFolderAccessible(folderPath)) {
         std::cerr << StringUtils::wstringToUtf8(folderPath) << " is not accessible.";
         return 1;
     }
 
-    // Generate a short unique client ID
+    // Unique client ID
     std::string clientId = IdUtils::generateShortId(8);
-#ifndef NDEBUG
     std::cout << "[Client] Generated client ID: " << clientId << std::endl;
-#endif
+
+    // Connect to server (PUSH → tcp://127.0.0.1:5555)
+    zmq::socket_t socket(zmqContext, zmq::socket_type::push);
+    socket.connect("tcp://127.0.0.1:5555");
 
     // Send initial SRC/DST message
     std::string initMsg = "SRC:" + std::string(argv[1]) + "|DST:" + std::string(argv[2]);
-    sendMessage(socketPath, clientId, initMsg);
+    sendMessage(socket, clientId, initMsg);
 
     // Start monitoring
-    monitorDirectory(folderPath, socketPath, clientId);
+    monitorDirectory(folderPath, socket, clientId);
 
     return 0;
 }
