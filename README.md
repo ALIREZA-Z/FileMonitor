@@ -32,6 +32,12 @@ Client detects changes → Sends message to Server → Server waits X seconds fo
    git clone https://github.com/microsoft/vcpkg.git
    cd vcpkg
    .\bootstrap-vcpkg.bat
+   
+   # Install library
+   vcpkg install zeromq
+   # Install cpp header
+   vcpkg install cppzmq
+
 
    cd FileMonitor
    .\compile_debug.bat 
